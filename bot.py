@@ -51,30 +51,16 @@ def clean_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
-# ── 네이버 현재가 조회 ──────────────────────────────────────────
-def get_stock_code(name: str):
+# ── 시세 조회 (시트의 종목코드 사용) ────────────────────────────
+def get_current_price(code: str):
+    """종목코드로 직접 시세 조회 — 자동검색 없음"""
+    if not code or not code.strip():
+        return None
     try:
-        url = "https://ac.finance.naver.com/ac"
-        params = {"q": name, "q_enc": "UTF-8", "target": "stock"}
-        res = requests.get(url, params=params, headers=HEADERS, timeout=5)
-        data = res.json()
-        items = data.get("items", [[]])[0]
-        for item in items:
-            if item[0] == name:
-                return item[1]
-        if items:
-            return items[0][1]
-    except Exception as e:
-        logger.error(f"종목코드 오류: {e}")
-    return None
-
-def get_current_price(name: str):
-    try:
-        code = get_stock_code(name)
-        if not code:
-            return None
-        url = f"https://m.stock.naver.com/api/stock/{code}/basic"
+        url = f"https://m.stock.naver.com/api/stock/{code.strip()}/basic"
         res = requests.get(url, headers=HEADERS, timeout=5)
+        if res.status_code != 200:
+            return None
         data = res.json()
         price      = int(str(data.get("closePrice", "0")).replace(",", "") or 0)
         change     = int(str(data.get("compareToPreviousClosePrice", "0")).replace(",", "") or 0)
@@ -142,15 +128,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if desc:
                         lines.append(f"➡️{desc}")
 
-            # 현재가 조회 (첫 번째 종목명 기준)
-            try:
-                first_name = list(grouped.keys())[0]
-                price_str = get_current_price(first_name)
+                # 종목코드는 첫 번째 행에서 가져옴
+                code = rows[0].get("종목코드", "").strip()
+                price_str = get_current_price(code)
                 if price_str:
                     lines.append("")
                     lines.append(f"📊 {price_str}")
-            except Exception as e:
-                logger.error(f"시세 오류: {e}")
 
             lines.append("")
 
