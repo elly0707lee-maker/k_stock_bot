@@ -35,13 +35,13 @@ def search_by_theme(query: str, data: list):
 
 
 # ── 네이버 뉴스 ─────────────────────────────────────────────────
-def get_naver_news(query: str, display: int = 5):
+def get_naver_news(query: str, display: int = 5, sort: str = "date"):
     url = "https://openapi.naver.com/v1/search/news.json"
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
     }
-    params = {"query": query, "display": display, "sort": "date"}
+    params = {"query": query, "display": display, "sort": sort}
     res = requests.get(url, headers=headers, params=params, timeout=10)
     if res.status_code == 200:
         return res.json().get("items", [])
@@ -89,15 +89,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.startswith("(") and query.endswith(")"):
         keyword = query[1:-1].strip()
         try:
-            news = get_naver_news(keyword, display=5)
-            if news:
-                lines.append(f"📰 [{keyword}] 최신 뉴스")
+            news_date = get_naver_news(keyword, display=3, sort="date")
+            news_sim  = get_naver_news(keyword, display=5, sort="sim")
+            date_links = {item["link"] for item in news_date}
+            news_sim_unique = [n for n in news_sim if n["link"] not in date_links][:2]
+
+            if news_date or news_sim_unique:
+                lines.append(f"📰 [{keyword}] 뉴스")
                 lines.append("")
-                for i, item in enumerate(news, 1):
-                    title = clean_html(item["title"])
-                    link  = item["link"]
-                    lines.append(f"{i}. {title}")
-                    lines.append(f"   🔗 {link}")
+                if news_date:
+                    lines.append("🕐 최신순")
+                    for i, item in enumerate(news_date, 1):
+                        lines.append(f"{i}. {clean_html(item['title'])}")
+                        lines.append(f"   🔗 {item['link']}")
+                if news_sim_unique:
+                    lines.append("")
+                    lines.append("🎯 관련도순")
+                    for i, item in enumerate(news_sim_unique, 1):
+                        lines.append(f"{i}. {clean_html(item['title'])}")
+                        lines.append(f"   🔗 {item['link']}")
             else:
                 lines.append(f"📰 '{keyword}' 관련 뉴스를 찾지 못했어요.")
         except Exception as e:
