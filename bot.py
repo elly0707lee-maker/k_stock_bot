@@ -65,11 +65,16 @@ def get_current_price(code: str):
         price      = int(str(data.get("closePrice", "0")).replace(",", "") or 0)
         change     = int(str(data.get("compareToPreviousClosePrice", "0")).replace(",", "") or 0)
         change_pct = float(data.get("fluctuationsRatio", 0))
+        mktcap_raw = int(str(data.get("marketValue", "0")).replace(",", "") or 0)
         if price == 0:
             return None
         arrow = "▲" if change >= 0 else "▼"
         sign  = "+" if change >= 0 else ""
-        return f"{price:,}원  {arrow} {abs(change):,} ({sign}{change_pct:.2f}%)"
+        result = f"{price:,}원  {arrow} {abs(change):,} ({sign}{change_pct:.2f}%)"
+        if mktcap_raw > 0:
+            mktcap_str = f"{mktcap_raw // 100000000:,}억원"
+            result += f"\n💰 시총 {mktcap_str}"
+        return result
     except Exception as e:
         logger.error(f"시세 오류: {e}")
         return None
