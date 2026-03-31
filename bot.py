@@ -52,47 +52,46 @@ def clean_html(text: str) -> str:
 
 
 # ── 네이버 증권 시세 ────────────────────────────────────────────
-def get_stock_code(name: str):
-    """종목명으로 종목코드 자동 조회"""
+def get_stock_price_by_name(name: str):
+    """종목명으로 시세 조회 (pykrx 활용)"""
     try:
-        url = f"https://ac.finance.naver.com/ac?q={requests.utils.quote(name)}&q_enc=UTF-8&target=stock"
-        res = requests.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
-        data = res.json()
-        items = data.get("items", [[]])[0]
-        for item in items:
-            if item[0] == name:
-                return item[1]
-        if items:
-            return items[0][1]
-    except Exception as e:
-        logger.error(f"종목코드 조회 오류: {e}")
-    return None
+        from pykrx import stock
+        from datetime import datetime, timedelta
 
-def get_stock_price(code: str):
-    """종목코드로 시세 조회"""
-    try:
-        url = f"https://m.stock.naver.com/api/stock/{code}/integration"
-        res = requests.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
-        data = res.json()
-        price_info = data.get("priceInfo", {})
-        comparisons = data.get("comparisons", [])
+        # 오늘 기준 날짜 설정
+        today = datetime.today()
+        today_str = today.strftime("%Y%m%d")
+        ago_3m   = (today - timedelta(days=95)).strftime("%Y%m%d")
+        ago_1m   = (today - timedelta(days=35)).strftime("%Y%m%d")
+        ago_5d   = (today - timedelta(days=10)).strftime("%Y%m%d")
 
-        result = {
-            "current": price_info.get("closePrice", ""),
-            "1일": price_info.get("fluctuationsRatio", ""),
+        # 종목명 → 코드 변환
+        tickers = stock.get_market_ticker_list(today_str, market="ALL")
+        code = None
+        for t in tickers:
+            if stock.get_market_ticker_name(t) == name:
+                code = t
+                break
+
+        if not code:
+            return None
+
+        def get_rate(start, end, code):
+            df = stock.get_market_price_change(start, end, market="ALL")
+            if code in df.index:
+                return df.loc[code, "등락률"]
+            return None
+
+        return {
+            "1일":  get_rate((today - timedelta(days=2)).strftime("%Y%m%d"), today_str, code),
+            "5일":  get_rate(ago_5d, today_str, code),
+            "1개월": get_rate(ago_1m, today_str, code),
+            "3개월": get_rate(ago_3m, today_str, code),
         }
 
-        period_map = {"1W": "5일", "1M": "1개월", "3M": "3개월"}
-        for c in comparisons:
-            period = c.get("comparePeriodCode", "")
-            rate = c.get("fluctuationsRatio", "")
-            if period in period_map:
-                result[period_map[period]] = rate
-
-        return result
     except Exception as e:
         logger.error(f"시세 조회 오류: {e}")
-    return None
+        return None
 
 def format_rate(rate) -> str:
     try:
@@ -152,16 +151,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # 시세 조회
             try:
                 first_name = stock_hits[0].get("종목명", "")
-                code = get_stock_code(first_name)
-                if code:
-                    price = get_stock_price(code)
-                    if price:
-                        lines.append("")
-                        lines.append("📊 시세")
-                        lines.append(f"• 1일    {format_rate(price.get('1일', '-'))}")
-                        lines.append(f"• 5일    {format_rate(price.get('5일', '-'))}")
-                        lines.append(f"• 1개월  {format_rate(price.get('1개월', '-'))}")
-                        lines.append(f"• 3개월  {format_rate(price.get('3개월', '-'))}")
+                price = get_stock_price_by_name(first_name)
+                if price:
+                    lines.append("")
+                    lines.append("📊 시세")
+                    lines.append(f"• 1일    {format_rate(price.get('1일', '-'))}")
+                    lines.append(f"• 5일    {format_rate(price.get('5일', '-'))}")
+                    lines.append(f"• 1개월  {format_rate(price.get('1개월', '-'))}")
+                    lines.append(f"• 3개월  {format_rate(price.get('3개월', '-'))}")
             except Exception as e:
                 logger.error(f"시세 오류: {e}")
 
