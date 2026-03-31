@@ -52,41 +52,76 @@ def clean_html(text: str) -> str:
 
 
 # ── 네이버 증권 시세 ────────────────────────────────────────────
-def get_stock_price_by_name(name: str):
-    """종목명으로 시세 조회 (pykrx 활용)"""
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+def get_stock_code(name: str):
+    """종목명 → 종목코드"""
     try:
-        from pykrx import stock
-        from datetime import datetime, timedelta
+        url = "https://ac.finance.naver.com/ac"
+        params = {"q": name, "q_enc": "UTF-8", "target": "stock"}
+        res = requests.get(url, params=params, headers=HEADERS, timeout=5)
+        data = res.json()
+        items = data.get("items", [[]])[0]
+        for item in items:
+            if item[0] == name:
+                return item[1]
+        if items:
+            return items[0][1]
+    except Exception as e:
+        logger.error(f"종목코드 조회 오류: {e}")
+    return None
 
-        # 오늘 기준 날짜 설정
-        today = datetime.today()
-        today_str = today.strftime("%Y%m%d")
-        ago_3m   = (today - timedelta(days=95)).strftime("%Y%m%d")
-        ago_1m   = (today - timedelta(days=35)).strftime("%Y%m%d")
-        ago_5d   = (today - timedelta(days=10)).strftime("%Y%m%d")
-
-        # 종목명 → 코드 변환
-        tickers = stock.get_market_ticker_list(today_str, market="ALL")
-        code = None
-        for t in tickers:
-            if stock.get_market_ticker_name(t) == name:
-                code = t
-                break
-
+def get_stock_price_by_name(name: str):
+    """종목명으로 등락률 조회 (네이버 금융 차트 데이터)"""
+    try:
+        code = get_stock_code(name)
         if not code:
+            logger.error(f"종목코드 없음: {name}")
             return None
 
-        def get_rate(start, end, code):
-            df = stock.get_market_price_change(start, end, market="ALL")
-            if code in df.index:
-                return df.loc[code, "등락률"]
+        # 최근 70일치 일봉 데이터 가져오기
+        url = "https://fchart.stock.naver.com/siseJson.naver"
+        params = {
+            "symbol": code,
+            "requestType": "1",
+            "count": "70",
+            "timeframe": "day"
+        }
+        res = requests.get(url, params=params, headers=HEADERS, timeout=8)
+        text = res.text.strip()
+
+        # 파싱: 각 줄 = [날짜, 시가, 고가, 저가, 종가, 거래량]
+        rows = []
+        for line in text.split("\n"):
+            line = line.strip().strip("[](),")
+            if not line:
+                continue
+            parts = [p.strip().strip("'\"") for p in line.split(",")]
+            if len(parts) >= 5 and parts[0].isdigit():
+                try:
+                    rows.append({"date": parts[0], "close": float(parts[4])})
+                except:
+                    continue
+
+        if len(rows) < 2:
             return None
 
+        def calc_rate(rows, n):
+            """n 거래일 전 대비 등락률"""
+            if len(rows) <= n:
+                n = len(rows) - 1
+            base = rows[-(n+1)]["close"]
+            current = rows[-1]["close"]
+            if base == 0:
+                return None
+            return round((current - base) / base * 100, 2)
+
+        # 1개월 ≈ 21거래일, 3개월 ≈ 63거래일
         return {
-            "1일":  get_rate((today - timedelta(days=2)).strftime("%Y%m%d"), today_str, code),
-            "5일":  get_rate(ago_5d, today_str, code),
-            "1개월": get_rate(ago_1m, today_str, code),
-            "3개월": get_rate(ago_3m, today_str, code),
+            "1일":   calc_rate(rows, 1),
+            "5일":   calc_rate(rows, 5),
+            "1개월": calc_rate(rows, 21),
+            "3개월": calc_rate(rows, 63),
         }
 
     except Exception as e:
