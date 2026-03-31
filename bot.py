@@ -73,13 +73,12 @@ def get_current_price(name: str):
         code = get_stock_code(name)
         if not code:
             return None
-        url = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
+        url = f"https://m.stock.naver.com/api/stock/{code}/basic"
         res = requests.get(url, headers=HEADERS, timeout=5)
         data = res.json()
-        stock = data.get("datas", [{}])[0]
-        price      = int(str(stock.get("closePrice", "0")).replace(",", "") or 0)
-        change     = int(str(stock.get("compareToPreviousClosePrice", "0")).replace(",", "") or 0)
-        change_pct = float(stock.get("fluctuationsRatio", 0))
+        price      = int(str(data.get("closePrice", "0")).replace(",", "") or 0)
+        change     = int(str(data.get("compareToPreviousClosePrice", "0")).replace(",", "") or 0)
+        change_pct = float(data.get("fluctuationsRatio", 0))
         if price == 0:
             return None
         arrow = "▲" if change >= 0 else "▼"
