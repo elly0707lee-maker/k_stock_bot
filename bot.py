@@ -26,11 +26,9 @@ def fetch_data():
     return list(reader)
 
 def search_by_stock(query: str, data: list):
-    """종목명 부분일치"""
     return [r for r in data if query in r.get("종목명", "")]
 
 def search_by_theme(query: str, data: list):
-    """테마 부분일치"""
     return [r for r in data if query in r.get("테마", "")]
 
 
@@ -49,92 +47,6 @@ def get_naver_news(query: str, display: int = 5):
 
 def clean_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
-
-
-# ── 네이버 증권 시세 ────────────────────────────────────────────
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
-def get_stock_code(name: str):
-    """종목명 → 종목코드"""
-    try:
-        url = "https://ac.finance.naver.com/ac"
-        params = {"q": name, "q_enc": "UTF-8", "target": "stock"}
-        res = requests.get(url, params=params, headers=HEADERS, timeout=5)
-        data = res.json()
-        items = data.get("items", [[]])[0]
-        for item in items:
-            if item[0] == name:
-                return item[1]
-        if items:
-            return items[0][1]
-    except Exception as e:
-        logger.error(f"종목코드 조회 오류: {e}")
-    return None
-
-def get_stock_price_by_name(name: str):
-    """종목명으로 등락률 조회 (네이버 금융 차트 데이터)"""
-    try:
-        code = get_stock_code(name)
-        if not code:
-            logger.error(f"종목코드 없음: {name}")
-            return None
-
-        # 최근 70일치 일봉 데이터 가져오기
-        url = "https://fchart.stock.naver.com/siseJson.naver"
-        params = {
-            "symbol": code,
-            "requestType": "1",
-            "count": "70",
-            "timeframe": "day"
-        }
-        res = requests.get(url, params=params, headers=HEADERS, timeout=8)
-        text = res.text.strip()
-
-        # 파싱: 각 줄 = [날짜, 시가, 고가, 저가, 종가, 거래량]
-        rows = []
-        for line in text.split("\n"):
-            line = line.strip().strip("[](),")
-            if not line:
-                continue
-            parts = [p.strip().strip("'\"") for p in line.split(",")]
-            if len(parts) >= 5 and parts[0].isdigit():
-                try:
-                    rows.append({"date": parts[0], "close": float(parts[4])})
-                except:
-                    continue
-
-        if len(rows) < 2:
-            return None
-
-        def calc_rate(rows, n):
-            """n 거래일 전 대비 등락률"""
-            if len(rows) <= n:
-                n = len(rows) - 1
-            base = rows[-(n+1)]["close"]
-            current = rows[-1]["close"]
-            if base == 0:
-                return None
-            return round((current - base) / base * 100, 2)
-
-        # 1개월 ≈ 21거래일, 3개월 ≈ 63거래일
-        return {
-            "1일":   calc_rate(rows, 1),
-            "5일":   calc_rate(rows, 5),
-            "1개월": calc_rate(rows, 21),
-            "3개월": calc_rate(rows, 63),
-        }
-
-    except Exception as e:
-        logger.error(f"시세 조회 오류: {e}")
-        return None
-
-def format_rate(rate) -> str:
-    try:
-        f = float(rate)
-        sign = "+" if f >= 0 else ""
-        return f"{sign}{f:.2f}%"
-    except:
-        return str(rate)
 
 
 # ── 메시지 핸들러 ───────────────────────────────────────────────
@@ -183,23 +95,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     line += f"\n➡️{desc}"
                 lines.append(line)
 
-            # 시세 조회
-            try:
-                first_name = stock_hits[0].get("종목명", "")
-                price = get_stock_price_by_name(first_name)
-                if price:
-                    lines.append("")
-                    lines.append("📊 시세")
-                    lines.append(f"• 1일    {format_rate(price.get('1일', '-'))}")
-                    lines.append(f"• 5일    {format_rate(price.get('5일', '-'))}")
-                    lines.append(f"• 1개월  {format_rate(price.get('1개월', '-'))}")
-                    lines.append(f"• 3개월  {format_rate(price.get('3개월', '-'))}")
-            except Exception as e:
-                logger.error(f"시세 오류: {e}")
-
             lines.append("")
 
-            # 뉴스는 종목명 검색에만 붙임
             try:
                 news = get_naver_news(query)
                 if news:
