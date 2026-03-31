@@ -51,6 +51,58 @@ def clean_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
+# ── 네이버 증권 시세 ────────────────────────────────────────────
+def get_stock_code(name: str):
+    """종목명으로 종목코드 자동 조회"""
+    try:
+        url = f"https://ac.finance.naver.com/ac?q={requests.utils.quote(name)}&q_enc=UTF-8&target=stock"
+        res = requests.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
+        data = res.json()
+        items = data.get("items", [[]])[0]
+        for item in items:
+            if item[0] == name:
+                return item[1]
+        if items:
+            return items[0][1]
+    except Exception as e:
+        logger.error(f"종목코드 조회 오류: {e}")
+    return None
+
+def get_stock_price(code: str):
+    """종목코드로 시세 조회"""
+    try:
+        url = f"https://m.stock.naver.com/api/stock/{code}/integration"
+        res = requests.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
+        data = res.json()
+        price_info = data.get("priceInfo", {})
+        comparisons = data.get("comparisons", [])
+
+        result = {
+            "current": price_info.get("closePrice", ""),
+            "1일": price_info.get("fluctuationsRatio", ""),
+        }
+
+        period_map = {"1W": "5일", "1M": "1개월", "3M": "3개월"}
+        for c in comparisons:
+            period = c.get("comparePeriodCode", "")
+            rate = c.get("fluctuationsRatio", "")
+            if period in period_map:
+                result[period_map[period]] = rate
+
+        return result
+    except Exception as e:
+        logger.error(f"시세 조회 오류: {e}")
+    return None
+
+def format_rate(rate) -> str:
+    try:
+        f = float(rate)
+        sign = "+" if f >= 0 else ""
+        return f"{sign}{f:.2f}%"
+    except:
+        return str(rate)
+
+
 # ── 메시지 핸들러 ───────────────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.strip()
@@ -96,6 +148,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if desc:
                     line += f"\n➡️{desc}"
                 lines.append(line)
+
+            # 시세 조회
+            try:
+                first_name = stock_hits[0].get("종목명", "")
+                code = get_stock_code(first_name)
+                if code:
+                    price = get_stock_price(code)
+                    if price:
+                        lines.append("")
+                        lines.append("📊 시세")
+                        lines.append(f"• 1일    {format_rate(price.get('1일', '-'))}")
+                        lines.append(f"• 5일    {format_rate(price.get('5일', '-'))}")
+                        lines.append(f"• 1개월  {format_rate(price.get('1개월', '-'))}")
+                        lines.append(f"• 3개월  {format_rate(price.get('3개월', '-'))}")
+            except Exception as e:
+                logger.error(f"시세 오류: {e}")
 
             lines.append("")
 
