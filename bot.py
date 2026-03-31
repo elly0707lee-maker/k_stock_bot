@@ -67,9 +67,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 name  = r.get("종목명", "")
                 theme = r.get("테마", "")
                 desc  = r.get("특징", "").strip()
-                line  = f"📌 [{name}]  테마: {theme}"
+                line  = f"📌 [{name}]\n🩷 {theme}"
                 if desc:
-                    line += f"\n   └ {desc}"
+                    line += f"\n➡️{desc}"
                 lines.append(line)
 
             lines.append("")
@@ -104,7 +104,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 desc  = r.get("특징", "").strip()
                 line  = f"{i}. {name}  ({theme})"
                 if desc:
-                    line += f"\n   └ {desc}"
+                    line += f"\n ➡️ {desc}"
                 lines.append(line)
 
         # ── 케이스 3: 없음 ─────────────────────────────────────
