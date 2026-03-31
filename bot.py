@@ -4,6 +4,7 @@ import csv
 import io
 import logging
 import requests
+from collections import OrderedDict
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
@@ -16,6 +17,7 @@ NAVER_CLIENT_SECRET = os.environ["NAVER_CLIENT_SECRET"]
 SHEET_ID            = os.environ["SHEET_ID"]
 
 SHEET_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
 # ── Google Sheets 조회 ──────────────────────────────────────────
@@ -47,6 +49,45 @@ def get_naver_news(query: str, display: int = 5):
 
 def clean_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
+
+
+# ── 네이버 현재가 조회 ──────────────────────────────────────────
+def get_stock_code(name: str):
+    try:
+        url = "https://ac.finance.naver.com/ac"
+        params = {"q": name, "q_enc": "UTF-8", "target": "stock"}
+        res = requests.get(url, params=params, headers=HEADERS, timeout=5)
+        data = res.json()
+        items = data.get("items", [[]])[0]
+        for item in items:
+            if item[0] == name:
+                return item[1]
+        if items:
+            return items[0][1]
+    except Exception as e:
+        logger.error(f"종목코드 오류: {e}")
+    return None
+
+def get_current_price(name: str):
+    try:
+        code = get_stock_code(name)
+        if not code:
+            return None
+        url = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
+        res = requests.get(url, headers=HEADERS, timeout=5)
+        data = res.json()
+        stock = data.get("datas", [{}])[0]
+        price      = int(str(stock.get("closePrice", "0")).replace(",", "") or 0)
+        change     = int(str(stock.get("compareToPreviousClosePrice", "0")).replace(",", "") or 0)
+        change_pct = float(stock.get("fluctuationsRatio", 0))
+        if price == 0:
+            return None
+        arrow = "▲" if change >= 0 else "▼"
+        sign  = "+" if change >= 0 else ""
+        return f"{price:,}원  {arrow} {abs(change):,} ({sign}{change_pct:.2f}%)"
+    except Exception as e:
+        logger.error(f"시세 오류: {e}")
+        return None
 
 
 # ── 메시지 핸들러 ───────────────────────────────────────────────
@@ -86,17 +127,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # ── 케이스 1: 종목명 검색 ──────────────────────────────
         if stock_hits:
+            grouped = OrderedDict()
             for r in stock_hits:
-                name  = r.get("종목명", "")
-                theme = r.get("테마", "")
-                desc  = r.get("특징", "").strip()
-                line  = f"📌 [{name}]\n🩷 {theme}"
-                if desc:
-                    line += f"\n➡️{desc}"
-                lines.append(line)
+                name = r.get("종목명", "")
+                if name not in grouped:
+                    grouped[name] = []
+                grouped[name].append(r)
+
+            for name, rows in grouped.items():
+                lines.append(f"📌 [{name}]")
+                for r in rows:
+                    theme = r.get("테마", "")
+                    desc  = r.get("특징", "").strip()
+                    lines.append(f"🩷 {theme}")
+                    if desc:
+                        lines.append(f"➡️{desc}")
+
+            # 현재가 조회 (첫 번째 종목명 기준)
+            try:
+                first_name = list(grouped.keys())[0]
+                price_str = get_current_price(first_name)
+                if price_str:
+                    lines.append("")
+                    lines.append(f"📊 {price_str}")
+            except Exception as e:
+                logger.error(f"시세 오류: {e}")
 
             lines.append("")
 
+            # 뉴스
             try:
                 news = get_naver_news(query)
                 if news:
