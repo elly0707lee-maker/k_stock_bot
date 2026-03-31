@@ -56,6 +56,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.strip()
     lines = []
 
+    # ── 괄호 입력: 뉴스 전용 검색 ────────────────────────────
+    if query.startswith("(") and query.endswith(")"):
+        keyword = query[1:-1].strip()
+        try:
+            news = get_naver_news(keyword, display=5)
+            if news:
+                lines.append(f"📰 [{keyword}] 최신 뉴스")
+                lines.append("")
+                for i, item in enumerate(news, 1):
+                    title = clean_html(item["title"])
+                    link  = item["link"]
+                    lines.append(f"{i}. {title}")
+                    lines.append(f"   🔗 {link}")
+            else:
+                lines.append(f"📰 '{keyword}' 관련 뉴스를 찾지 못했어요.")
+        except Exception as e:
+            logger.error(f"뉴스 오류: {e}")
+            lines.append("⚠️ 뉴스를 불러오지 못했어요.")
+
+        await update.message.reply_text(
+            "\n".join(lines),
+            disable_web_page_preview=True
+        )
+        return
+
     try:
         data = fetch_data()
         stock_hits = search_by_stock(query, data)
