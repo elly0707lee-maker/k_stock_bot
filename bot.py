@@ -164,6 +164,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if price_str:
                     lines.append("")
                     lines.append(f"📊 {price_str}")
+                if code:
+                    lines.append(f"🔗 https://finance.naver.com/item/main.naver?code={code}")
 
             lines.append("")
 
