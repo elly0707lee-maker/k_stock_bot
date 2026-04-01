@@ -66,15 +66,29 @@ def get_current_price(code: str):
         change     = int(str(data.get("compareToPreviousClosePrice", "0")).replace(",", "") or 0)
         change_pct = float(data.get("fluctuationsRatio", 0))
         mktcap_raw = int(str(data.get("marketValue", "0")).replace(",", "") or 0)
+        high52     = str(data.get("fiftyTwoWeekHighPrice", "")).replace(",", "")
+        low52      = str(data.get("fiftyTwoWeekLowPrice",  "")).replace(",", "")
+        per        = data.get("per", "")
+        pbr        = data.get("pbr", "")
         if price == 0:
             return None
         arrow = "▲" if change >= 0 else "▼"
         sign  = "+" if change >= 0 else ""
-        result = f"{price:,}원  {arrow} {abs(change):,} ({sign}{change_pct:.2f}%)"
+        result_lines = []
+        result_lines.append(f"{price:,}원  {arrow} {abs(change):,} ({sign}{change_pct:.2f}%)")
         if mktcap_raw > 0:
-            mktcap_str = f"{mktcap_raw // 100000000:,}억원"
-            result += f"\n💰 시총 {mktcap_str}"
-        return result
+            result_lines.append(f"💰 시총 {mktcap_raw // 100000000:,}억원")
+        if high52 and low52:
+            try:
+                result_lines.append(f"📈 52주  최고 {int(high52):,}원 / 최저 {int(low52):,}원")
+            except:
+                pass
+        parts = []
+        if per: parts.append(f"PER {per}배")
+        if pbr: parts.append(f"PBR {pbr}배")
+        if parts:
+            result_lines.append(f"📋 {' / '.join(parts)}")
+        return "\n".join(result_lines)
     except Exception as e:
         logger.error(f"시세 오류: {e}")
         return None
@@ -139,7 +153,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for r in rows:
                     theme = r.get("테마", "")
                     desc  = r.get("특징", "").strip()
-                    lines.append(f"🩷 {theme}")
+                    lines.append(f"☑️ {theme}")
                     if desc:
                         lines.append(f"➡️{desc}")
                     lines.append("")
