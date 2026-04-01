@@ -142,6 +142,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     lines.append(f"🩷 {theme}")
                     if desc:
                         lines.append(f"➡️{desc}")
+                    lines.append("")
 
                 # 종목코드는 첫 번째 행에서 가져옴
                 code = rows[0].get("종목코드", "").strip()
@@ -154,14 +155,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # 뉴스
             try:
-                news = get_naver_news(query)
-                if news:
-                    lines.append(f"📰 최신 뉴스 ({query})")
-                    for i, item in enumerate(news, 1):
-                        title = clean_html(item["title"])
-                        link  = item["link"]
-                        lines.append(f"{i}. {title}")
-                        lines.append(f"   🔗 {link}")
+                news_date = get_naver_news(query, display=3, sort="date")
+                news_sim  = get_naver_news(query, display=5, sort="sim")
+                date_links = {item["link"] for item in news_date}
+                news_sim_unique = [n for n in news_sim if n["link"] not in date_links][:2]
+
+                if news_date or news_sim_unique:
+                    lines.append(f"📰 뉴스 ({query})")
+                    lines.append("")
+                    if news_date:
+                        lines.append("🕐 최신순")
+                        for i, item in enumerate(news_date, 1):
+                            lines.append(f"{i}. {clean_html(item['title'])}")
+                            lines.append(f"   🔗 {item['link']}")
+                    if news_sim_unique:
+                        lines.append("")
+                        lines.append("🎯 관련도순")
+                        for i, item in enumerate(news_sim_unique, 1):
+                            lines.append(f"{i}. {clean_html(item['title'])}")
+                            lines.append(f"   🔗 {item['link']}")
                 else:
                     lines.append("📰 관련 뉴스를 찾지 못했어요.")
             except Exception as e:
