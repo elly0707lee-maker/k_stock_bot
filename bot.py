@@ -62,30 +62,46 @@ def get_current_price(code: str):
         if res.status_code != 200:
             return None
         data = res.json()
-        price      = int(str(data.get("closePrice", "0")).replace(",", "") or 0)
-        change     = int(str(data.get("compareToPreviousClosePrice", "0")).replace(",", "") or 0)
-        change_pct = float(data.get("fluctuationsRatio", 0))
-        mktcap_raw = int(str(data.get("marketValue", "0")).replace(",", "") or 0)
-        high52     = str(data.get("fiftyTwoWeekHighPrice", "")).replace(",", "")
-        low52      = str(data.get("fiftyTwoWeekLowPrice",  "")).replace(",", "")
-        per        = data.get("per", "")
-        pbr        = data.get("pbr", "")
+        def gv(*keys):
+            """여러 키 이름 순서대로 시도"""
+            for k in keys:
+                v = data.get(k, "")
+                if v and str(v) not in ("0", "0.0", "null", "None", ""):
+                    return str(v).replace(",", "")
+            return ""
+
+        price_s    = gv("closePrice", "currentPrice", "price")
+        change_s   = gv("compareToPreviousClosePrice", "priceChange", "change")
+        pct_s      = gv("fluctuationsRatio", "changeRate", "priceChangeRate")
+        mktcap_s   = gv("marketValue", "marketCap", "marcap")
+        high52_s   = gv("fiftyTwoWeekHighPrice", "week52HighPrice", "high52")
+        low52_s    = gv("fiftyTwoWeekLowPrice",  "week52LowPrice",  "low52")
+        per_s      = gv("per", "PER", "pbr")
+        pbr_s      = gv("pbr", "PBR")
+
+        price = int(price_s or 0)
         if price == 0:
+            logger.error(f"시세 0: {list(data.keys())[:15]}")
             return None
+
+        change     = int(change_s or 0)
+        change_pct = float(pct_s or 0)
+        mktcap_raw = int(mktcap_s or 0)
+
         arrow = "▲" if change >= 0 else "▼"
         sign  = "+" if change >= 0 else ""
         result_lines = []
         result_lines.append(f"{price:,}원  {arrow} {abs(change):,} ({sign}{change_pct:.2f}%)")
         if mktcap_raw > 0:
             result_lines.append(f"💰 시총 {mktcap_raw // 100000000:,}억원")
-        if high52 and low52:
+        if high52_s and low52_s:
             try:
-                result_lines.append(f"📈 52주  최고 {int(high52):,}원 / 최저 {int(low52):,}원")
+                result_lines.append(f"📈 52주  최고 {int(high52_s):,}원 / 최저 {int(low52_s):,}원")
             except:
                 pass
         parts = []
-        if per: parts.append(f"PER {per}배")
-        if pbr: parts.append(f"PBR {pbr}배")
+        if per_s: parts.append(f"PER {per_s}배")
+        if pbr_s: parts.append(f"PBR {pbr_s}배")
         if parts:
             result_lines.append(f"📋 {' / '.join(parts)}")
         return "\n".join(result_lines)
