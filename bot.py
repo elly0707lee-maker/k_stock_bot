@@ -15,9 +15,30 @@ TELEGRAM_TOKEN      = os.environ["TELEGRAM_TOKEN"]
 NAVER_CLIENT_ID     = os.environ["NAVER_CLIENT_ID"]
 NAVER_CLIENT_SECRET = os.environ["NAVER_CLIENT_SECRET"]
 SHEET_ID            = os.environ["SHEET_ID"]
+DASHBOARD_URL       = os.environ.get("DASHBOARD_URL", "")
+API_SECRET          = os.environ.get("API_SECRET", "moneyplus")
 
 SHEET_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+
+# ── 대시보드 전송 ────────────────────────────────────────────────
+def send_to_dashboard(content: str, tab: str = "feature"):
+    """검색 결과를 대시보드 리포트 탭으로 전송"""
+    if not DASHBOARD_URL:
+        return
+    type_map = {"up": "report_up", "dn": "report_dn", "feature": "report_feature"}
+    post_type = type_map.get(tab, "report_feature")
+    try:
+        requests.post(
+            f"{DASHBOARD_URL}/api/post/{post_type}",
+            headers={"X-API-Secret": API_SECRET},
+            json={"content": content, "date": __import__('datetime').datetime.now().strftime("%Y-%m-%d")},
+            timeout=8
+        )
+        logger.info(f"대시보드 리포트({tab}) 전송 완료")
+    except Exception as e:
+        logger.warning(f"대시보드 전송 실패: {e}")
 
 
 # ── Google Sheets 조회 ──────────────────────────────────────────
@@ -51,9 +72,8 @@ def clean_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
-# ── 시세 조회 (시트의 종목코드 사용) ────────────────────────────
+# ── 시세 조회 ────────────────────────────────────────────────────
 def get_current_price(code: str):
-    """종목코드로 직접 시세 조회 — 자동검색 없음"""
     if not code or not code.strip():
         return None
     try:
@@ -63,7 +83,6 @@ def get_current_price(code: str):
             return None
         data = res.json()
         def gv(*keys):
-            """여러 키 이름 순서대로 시도"""
             for k in keys:
                 v = data.get(k, "")
                 if v and str(v) not in ("0", "0.0", "null", "None", ""):
@@ -81,7 +100,6 @@ def get_current_price(code: str):
 
         price = int(price_s or 0)
         if price == 0:
-            logger.error(f"시세 0: {list(data.keys())[:15]}")
             return None
 
         change     = int(change_s or 0)
@@ -115,6 +133,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.strip()
     lines = []
 
+    # 대시보드 전송 탭 감지 — "대시보드/" 접두어로 탭 지정 가능
+    # 예: "대시보드/상승 삼성전자" → 상승 탭으로 전송
+    send_tab = "feature"
+    if query.startswith("대시보드/상승"):
+        send_tab = "up"
+        query = query.replace("대시보드/상승", "").strip()
+    elif query.startswith("대시보드/하락"):
+        send_tab = "dn"
+        query = query.replace("대시보드/하락", "").strip()
+    elif query.startswith("대시보드/"):
+        send_tab = "feature"
+        query = query.replace("대시보드/", "").strip()
+
     # ── 괄호 입력: 뉴스 전용 검색 ────────────────────────────
     if query.startswith("(") and query.endswith(")"):
         keyword = query[1:-1].strip()
@@ -144,10 +175,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"뉴스 오류: {e}")
             lines.append("⚠️ 뉴스를 불러오지 못했어요.")
 
-        await update.message.reply_text(
-            "\n".join(lines),
-            disable_web_page_preview=True
-        )
+        result_text = "\n".join(lines)
+        await update.message.reply_text(result_text, disable_web_page_preview=True)
+        send_to_dashboard(result_text, send_tab)
         return
 
     try:
@@ -174,7 +204,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         lines.append(f"➡️{desc}")
                     lines.append("")
 
-                # 종목코드는 첫 번째 행에서 가져옴
                 code = rows[0].get("종목코드", "").strip()
                 price_str = get_current_price(code)
                 if price_str:
@@ -185,7 +214,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             lines.append("")
 
-            # 뉴스
             try:
                 news_date = get_naver_news(query, display=3, sort="date")
                 news_sim  = get_naver_news(query, display=5, sort="sim")
@@ -238,10 +266,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Sheets 오류: {e}")
         lines.append("⚠️ 데이터를 불러오지 못했어요. 잠시 후 다시 시도해주세요.")
 
-    await update.message.reply_text(
-        "\n".join(lines),
-        disable_web_page_preview=True
-    )
+    result_text = "\n".join(lines)
+    await update.message.reply_text(result_text, disable_web_page_preview=True)
+
+    # ✅ 대시보드로 자동 전송
+    if stock_hits or theme_hits:
+        send_to_dashboard(result_text, send_tab)
 
 
 # ── 실행 ────────────────────────────────────────────────────────
